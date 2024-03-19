@@ -1,0 +1,331 @@
+Description
+We have a data channel over which we want to transmit strings of (8-bit) bytes. Unfortunately the data channel leads through the jungle, where monkeys do some monkey stuff with your valuable data.
+
+Your task is to write a function send([byte]) -> [byte] as well as a function receive([byte]) -> [byte].
+
+receive(monkey(send(msg))) = msg must be valid for all possible byte strings msg.
+
+The monkey function
+I'm afraid to tell you, these monkeys are not trainable, they will do whatever they want to do with your data.
+
+Luckily they are a bit too clumsy to do other things than:
+
+Swap up to 1 Bit per byte (e.g. monkey([0011 0010]) ↪︎ [0011 0110])
+Reverse any bytes (e.g. monkey([0011 0010]) ↪︎ [0100 1100])
+Completely distort the order of every 4 byte chunk you send (e.g. monkey([1, 2, 3, 4, 5]) ↪︎ [4, 3, 2, 1, 5]) (but monkey([1, 2, 3, 4, 5]) ↪︎ [1, 5, 4, 3, 2] will not happen)
+Example
+monkey([0100 0001, 0001 0000, 1111 1111]) = 0000 1000, 1101 1111, 1000 0000
+Bonus
+Try to minimize the data you transmit.
+
+
+
+Описание
+
+У нас есть канал данных, по которому мы хотим передавать строки из (8-битных) байтов. К сожалению, канал данных проходит через джунгли, где обезьяны проделывают какие-то обезьяньи дела с вашими ценными данными.
+
+
+    Ваша задача — написать функцию send([byte]) -> [byte],
+    а также функцию получения([byte]) -> [byte].
+
+
+    get(monkey(send(msg))) = msg должно быть допустимым для всех возможных байтовых строк msg.
+
+    
+    
+Функция обезьяны
+Боюсь вам сказать, эти обезьяны не поддаются дрессировке, они будут делать с вашими данными все, что захотят.
+
+
+    К счастью, они слишком неуклюжи, чтобы делать что-то еще, кроме:
+
+Поменяйте местами до 1 бита на байт (например, Monkey([0011 0010]) ↪︎ [0011 0110])
+
+Переверните любые байты (например, Monkey([0011 0010]) ↪︎ [0100 1100])
+
+Полностью исказите порядок каждого отправляемого вами 4-байтового фрагмента (например, Monkey([1, 2, 3, 4, 5]) ↪︎ [4, 3, 2, 1, 5]) (но Monkey([1, 2, 3 , 4, 5]) ↪︎ [1, 5, 4, 3, 2] не произойдет)
+
+Пример
+обезьяна([0100 0001, 0001 0000, 1111 1111]) = 0000 1000, 1101 1111, 1000 0000
+Бонус
+Постарайтесь свести к минимуму передаваемые данные.
+
+
+
+
+fn send(data: &[u8]) -> Vec<u8> {
+    data.iter()
+        .map(|&byte| (0..4).map(move |i| {
+            let chunk = (byte & 0b11 << 6 >> i * 2) << i * 2 >> 6;
+            let byte = (chunk << 6) + (chunk << 4) + (chunk << 2);
+            let correction = if chunk % 2 == 0 { 0b00000000 } else { 0b11000011 };
+            [byte, byte, byte, correction]
+        }))
+        .flatten()
+        .flatten()
+        .collect()
+}
+
+fn receive(data: &[u8]) -> Vec<u8> {
+    data.chunks(16)
+        .map(|set| [&set[0..4], &set[4..8], &set[8..12], &set[12..16]]
+            .into_iter()
+            .map(|bytes| {
+                let descrambled = [
+                    descramble(bytes[0]),
+                    descramble(bytes[1]),
+                    descramble(bytes[2]),
+                    descramble(bytes[3]),
+                ];
+
+                let is_odd = descrambled.iter().any(|&chunk| chunk == 255);
+
+                let chunk = descrambled.iter().find(|&&chunk| chunk != 255 && chunk != 0).copied().unwrap_or(0);
+
+                match (is_odd, chunk % 2) {
+                    (true, 0) | (false, 1) => chunk.reverse_bits() >> 6,
+                    _ => chunk
+                }
+            })
+            .fold(0, |acc, chunk| (acc << 2) + chunk)
+        )
+        .collect()
+}
+
+fn descramble(byte: u8) -> u8 {
+    let mut quads = get_quads(byte);
+    
+    if [(3, 0), (4, 1), (4, 0)].contains(&((byte & 0b11000011).count_ones(), (byte & 0b00111100).count_ones())) {
+        return 255;
+    }
+    
+    if quads[3] != 0 && (quads[0] != quads[1] || quads[0] != quads[2]) {
+        quads = get_quads(byte.reverse_bits());
+    }
+    
+    match quads[..3] {
+        [x1, x2, _] | [x1, _, x2] | [_, x1, x2]  if x1 == x2 => x1,
+        _ => unreachable!()
+    }
+}
+
+fn get_quads(byte: u8) -> [u8; 4] {
+    [
+        (byte & 0b11 << 6) >> 6,
+        (byte & 0b11 << 4) >> 4,
+        (byte & 0b11 << 2) >> 2,
+        (byte & 0b11 << 0) >> 0
+    ]
+}
+Best Practices0Clever0
+ 0ForkCompare with your solutionLink
+danielreisinger
+fn send(data: &[u8]) -> Vec<u8> {
+    data
+        .iter()
+        .flat_map(|&b| (0..8).rev().map(move |i| b & (1 << i) != 0))
+        .flat_map(|b| [u8::from(b) * 0xFF; 4])
+        .collect()
+}
+
+fn receive(data: &[u8]) -> Vec<u8> {
+    debug_assert!(data.len() % (4 * 8) == 0);
+    data
+        .chunks(4 * 8)
+        .map(|c| c.chunks(4)
+            .map(|c| u8::from(c[0].count_ones() >= 7))
+            .fold(0, |acc, i| (acc << 1) | i)
+        )
+        .collect()
+}
+Best Practices0Clever0
+ 0ForkCompare with your solutionLink
+coryshrmn
+fn send(data: &[u8]) -> Vec<u8> {
+    // repeat each bit for 4 bytes
+    let mut encoded = vec![];
+    for byte in data {
+        for bit_index in 0..8 {
+            let mask = 1 << bit_index;
+            let bit = byte & mask != 0;
+            let output = if bit { 255 } else { 0 };
+            for _ in 0..4 {
+                encoded.push(output);
+            }
+        }
+    }
+    encoded
+}
+
+fn receive(data: &[u8]) -> Vec<u8> {
+    let mut bits = vec![];
+    
+    // check every 4th byte
+    for byte in data.iter().step_by(4) {
+        let bit = byte.count_ones() > 4;
+        bits.push(bit);
+    }
+    
+    // convert bits to u8s
+    let mut decoded = vec![];
+    for byte_index in 0..(bits.len() / 8) {
+        let mut byte = 0;
+        for bit_index in 0..8 {
+            if bits[byte_index * 8 + bit_index] {
+                let mask = 1 << bit_index;
+                byte |= mask;
+            }
+        }
+        decoded.push(byte);
+    }
+    
+    decoded
+}
+Best Practices0Clever0
+ 0ForkCompare with your solutionLink
+Voile
+fn send(data: &[u8]) -> Vec<u8> {
+    data.iter().flat_map(|&b| (0..8).flat_map(move |n| vec![255 * ((b & (1<<n)) >> n); 4])).collect()
+}
+
+fn receive(data: &[u8]) -> Vec<u8> {
+    data.chunks(32).map(|r| (0..8).map(move |n| (1 << n) * (r[4*n].count_ones() > 4) as u8).sum()).collect()
+}
+Best Practices0Clever0
+ 0ForkCompare with your solutionLink
+Voile
+use std::io::Write;
+
+fn send(data: &[u8]) -> Vec<u8> {
+    println!("send: {:}", data.len());
+    std::io::stdout().flush().unwrap();
+    data.iter().flat_map(|&b| (0..8).flat_map(move |n| vec![255 * ((b & (1<<n)) >> n); 4])).collect()
+}
+
+fn receive(data: &[u8]) -> Vec<u8> {
+    println!("receive: {:}", data.len());
+    std::io::stdout().flush().unwrap();
+    data.chunks(32).map(|r| (0..8).map(move |n| (1 << n) * (r[4*n].count_ones() > 4) as u8).sum()).collect()
+}
+Best Practices0Clever0
+ 0ForkCompare with your solutionLink
+MatrixNatrix
+fn triplet_checksum(t: u8) -> bool {
+    matches!(t, 1 | 2 | 4 | 7)
+}
+
+fn send(data: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(data.len() << 3);
+    for byte in data {
+        for i in 0..8 {
+            let bit = (byte >> i) & 1;
+            let triplet = bit | ((i & 3) << 1);
+            let nibble = triplet << 1;
+            let mut res_byte = nibble | nibble.reverse_bits();
+            if triplet_checksum(triplet) {
+                res_byte |= 0x81
+            }
+            result.push(res_byte)
+        }
+    }
+    result
+}
+
+fn receive(data: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(data.len() >> 3);
+    for byte_group in data.chunks_exact(8) {
+        let mut byte = 0;
+        for i in 0..8 {
+            let input = byte_group[i];
+            let triplet1 = (input >> 1) & 7;
+            let triplet2 = (input.reverse_bits() >> 1) & 7;
+            let triplet = if triplet_checksum(triplet1) == (input & 1 > 0) {
+                triplet1
+            } else {
+                triplet2
+            };
+            if triplet & 1 > 0 {
+                byte |= 1 << ((i as u8 & 4) | (triplet >> 1))
+            }
+        }
+        result.push(byte)
+    }
+    result
+}
+Best Practices0Clever0
+
+
+
+****
+
+
+#[cfg(test)]
+mod tests {
+    fn test_with_data<F: Fn(Vec<u8>) -> Vec<u8>>(data: &[u8], monkey: F) {
+        let sent = super::send(data);
+        let monkeyed = monkey(sent.clone());
+        let result = super::receive(&monkeyed);
+        if result.as_slice() != data {
+            eprintln!("ERROR: You could not restore the data correctly!");
+            eprintln!("msg                        = {:02x?}", data);
+            eprintln!("send(msg)                  = {:02x?}", sent);
+            eprintln!("monkey(send(msg))          = {:02x?}", monkeyed);
+            eprintln!("receive(monkey(send(msg))) = {:02x?}", result);
+            panic!("test failed");
+        }
+    }
+    
+    #[test]
+    fn test_unchanged() {
+        test_with_data(&[], core::convert::identity);
+        test_with_data(b"Hello, World!", core::convert::identity);
+    }
+    
+    #[test]
+    fn test_only_bitflips() {
+        let test = |data| {
+            for i in 0..8 {
+                test_with_data(data, |mut d| {
+                    d.iter_mut().for_each(|v| *v ^= 1 << i);
+                    d
+                })
+            }
+        };
+        test(b"Hello, World!");
+        test(b"?");
+        test(b"eggPlant");
+        test(b"uneven ");
+    }
+
+    #[test]
+    fn test_only_reverse_bits() {
+        let test = |data| {
+            test_with_data(data, |mut d| {
+                d.iter_mut().for_each(|v| *v = v.reverse_bits());
+                d
+            })
+        };
+        test(b"Hello, World!");
+        test(b"?");
+        test(b"eggPlant");
+        test(b"uneven ");
+    }
+    
+    #[test]
+    fn test_only_rotate_bytes() {
+        let test = |data| {
+            for i in 1..4 {
+                test_with_data(data, |mut d| {
+                    for chunk in d.chunks_mut(4) {
+                        chunk.rotate_right(i)
+                    }
+                    d
+                })
+            }
+        };
+        test(b"Hello, World!");
+        test(b"?");
+        test(b"eggPlant");
+        test(b"uneven ");
+    }
+}
